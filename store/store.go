@@ -102,7 +102,13 @@ func (a *Alerts) Set(alert *types.Alert) error {
 	a.Lock()
 	defer a.Unlock()
 
-	a.c[alert.Fingerprint()] = alert
+	if currAlert, ok := a.c[alert.Fingerprint()]; ok {
+		if currAlert.Resolved() && !alert.Resolved() {
+			a.c[alert.Fingerprint()] = alert
+		}
+	} else {
+		a.c[alert.Fingerprint()] = alert
+	}
 	return nil
 }
 
