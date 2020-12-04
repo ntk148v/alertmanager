@@ -19,8 +19,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-kit/kit/log"
+	"github.com/go-kit/kit/log/level"
 	"github.com/prometheus/alertmanager/types"
 	"github.com/prometheus/common/model"
+	"github.com/prometheus/common/promlog"
 )
 
 var (
@@ -34,8 +37,9 @@ var (
 // resolved alerts that have been removed.
 type Alerts struct {
 	sync.Mutex
-	c  map[model.Fingerprint]*types.Alert
-	cb func([]*types.Alert)
+	c      map[model.Fingerprint]*types.Alert
+	cb     func([]*types.Alert)
+	logger log.Logger
 }
 
 // NewAlerts returns a new Alerts struct.
@@ -44,6 +48,18 @@ func NewAlerts() *Alerts {
 		c:  make(map[model.Fingerprint]*types.Alert),
 		cb: func(_ []*types.Alert) {},
 	}
+
+	// Setup logging - It doesn't follow the given flags
+	// Hardcode here!
+	logLevel := promlog.AllowedLevel{}
+	logLevel.Set("debug")
+	logFormat := promlog.AllowedFormat{}
+	logFormat.Set("json")
+	promlogConfig := promlog.Config{
+		Level:  &logLevel,
+		Format: &logFormat,
+	}
+	a.logger = promlog.New(&promlogConfig)
 
 	return a
 }
@@ -102,13 +118,23 @@ func (a *Alerts) Set(alert *types.Alert) error {
 	a.Lock()
 	defer a.Unlock()
 
+	// NOTE(kiennt): If there are two alerts with the same fingerprint,
+	//               with very close updated at time, wait until next cycle.
 	if currAlert, ok := a.c[alert.Fingerprint()]; ok {
-		if currAlert.Resolved() && !alert.Resolved() {
+		level.Debug(a.logger).Log("msg", "found an alert in the same fingerprint in store", "fp", alert.Fingerprint())
+		if currAlert.Resolved() || !alert.Resolved() {
 			a.c[alert.Fingerprint()] = alert
+		} else if currAlert.UpdatedAt.Add(1 * time.Minute).Before(alert.UpdatedAt) {
+			a.c[alert.Fingerprint()] = alert
+		} else {
+			level.Debug(a.logger).Log("msg", "ignore the new arrival alert", "fp", alert.Fingerprint(),
+				"currentState", currAlert.Status(), "newState", alert.Status(),
+				"currentUpdatedAt", currAlert.UpdatedAt, "newUpdatedAt", alert.UpdatedAt)
 		}
-	} else {
-		a.c[alert.Fingerprint()] = alert
+		return nil
 	}
+
+	a.c[alert.Fingerprint()] = alert
 	return nil
 }
 
