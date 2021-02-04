@@ -121,10 +121,9 @@ func (a *Alerts) Set(alert *types.Alert) error {
 	// NOTE(kiennt): If there are two alerts with the same fingerprint,
 	//               with very close updated at time, wait until next cycle.
 	if currAlert, ok := a.c[alert.Fingerprint()]; ok {
-		level.Debug(a.logger).Log("msg", "found an alert in the same fingerprint in store", "fp", alert.Fingerprint())
 		if currAlert.Resolved() || !alert.Resolved() {
 			a.c[alert.Fingerprint()] = alert
-		} else if currAlert.UpdatedAt.Add(1 * time.Minute).Before(alert.UpdatedAt) {
+		} else if currAlert.UpdatedAt.Add(2 * time.Minute).Before(alert.UpdatedAt) {
 			a.c[alert.Fingerprint()] = alert
 		} else {
 			level.Debug(a.logger).Log("msg", "ignore the new arrival alert", "fp", alert.Fingerprint(),
